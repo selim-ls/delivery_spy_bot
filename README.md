@@ -23,6 +23,6 @@ Enfin, lancez le bot en exécutant le script principal `main.py`.
 
 ## Auteur
 
-Ce projet a été développé par [votre_nom] et est distribué sous licence [licence].
+Ce projet a été développé par Selim Le Strat et est distribué sous licence [licence].
 
 Pour plus d'informations, consultez le fichier `LICENSE`.

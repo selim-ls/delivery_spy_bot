@@ -68,7 +68,7 @@ def recuperer_offre(url, headers):
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
         if url.startswith('https://deliveroo.fr/'):
-            # Check Marketer Offer (Menu Discount)
+            # Menu Discount
             titre = soup.find(string=re.compile("sur tout le menu"))
             mov = soup.find(string=re.compile("Pour les commandes"))
             condition = soup.find(string=re.compile("Offre valable"))
@@ -80,7 +80,7 @@ def recuperer_offre(url, headers):
                 return "{}: {}".format(filter_out_unicode(titre), filter_out_unicode(condition))
             elif titre:
                 return "{}".format(filter_out_unicode(titre))
-            # Check BOGO or Free Item or Special Offer
+            # BOGO, Free Item, Special Offer
             else:
                 promo = ['1 acheté = 1 offert', 'Produits offerts', 'Produit offert', 'Offres', 'Sélection de produits à -20 %', 
                         'Sélection de produits à -25 %','Sélection de produits à -30 %', 'Sélection de produits à -50 %']
@@ -111,38 +111,58 @@ def recuperer_offre(url, headers):
         print("La requête a échoué :", response.status_code)
         return None
     
-def save_and_update_offre(dict_url, existing_df=None):
-    '''Crée un nouveau DataFrame lors de la première entrée dans dict_url,
-    et met à jour le DataFrame existant lorsqu'il y a de nouvelles entrées'''
-    global df_offres
-    if existing_df is None:
-        data = []
-        for user, url in dict_url.items():
-            url_restaurant = clean_url(url)
-            nom_restaurant = recuperer_nom(url_restaurant, headers)
-            offre_actuelle = recuperer_offre(url_restaurant, headers)
-            user_id = user
-            data.append({'user_id': user_id, 'url_restaurant': url_restaurant, 'nom_restaurant': nom_restaurant, 'offre_actuelle': offre_actuelle})
-        df_offres = pd.DataFrame(data)
-    else:
-        df_offres = existing_df.copy()
-        if 'offre_t-1' in df_offres.columns:
-            df_offres.drop(columns='offre_t-1', inplace=True)
-        if 'offre_actuelle' in df_offres.columns:
-            df_offres['offre_actuelle'] = df_offres['offre_actuelle'].astype(object)
-            df_offres.rename(columns={'offre_actuelle': 'offre_t-1'}, inplace=True)
-            for index, row in df_offres.iterrows():
-                nouvelle_offre = recuperer_offre(row['url_restaurant'], headers)
-                df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
-            for user, url in dict_url.items():
-                if url not in df_offres['url_restaurant'].values:
-                    url_restaurant = clean_url(url)
-                    nom_restaurant = recuperer_nom(url_restaurant, headers)
-                    nouvelle_offre = recuperer_offre(url_restaurant, headers)
-                    user_id = user
-                    df_offres.loc[len(df_offres.index)] = [user_id, url_restaurant, nom_restaurant, np.nan, nouvelle_offre]
-    file_name = 'df_offres.csv'
+# def save_and_update_offre(dict_url, existing_df=None):
+#     '''Crée un nouveau DataFrame lors de la première entrée dans dict_url,
+#     et met à jour le DataFrame existant lorsqu'il y a de nouvelles entrées'''
+#     global df_offres
+#     if existing_df is None:
+#         data = []
+#         for user, url in dict_url.items():
+#             url_restaurant = clean_url(url)
+#             nom_restaurant = recuperer_nom(url_restaurant, headers)
+#             offre_actuelle = recuperer_offre(url_restaurant, headers)
+#             user_id = user
+#             data.append({'user_id': user_id, 'url_restaurant': url_restaurant, 'nom_restaurant': nom_restaurant, 'offre_actuelle': offre_actuelle})
+#         df_offres = pd.DataFrame(data)
+#     else:
+#         df_offres = existing_df.copy()
+#         if 'offre_t-1' in df_offres.columns:
+#             df_offres.drop(columns='offre_t-1', inplace=True)
+#         if 'offre_actuelle' in df_offres.columns:
+#             df_offres['offre_actuelle'] = df_offres['offre_actuelle'].astype(object)
+#             df_offres.rename(columns={'offre_actuelle': 'offre_t-1'}, inplace=True)
+#             for index, row in df_offres.iterrows():
+#                 nouvelle_offre = recuperer_offre(row['url_restaurant'], headers)
+#                 df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
+#             for user, url in dict_url.items():
+#                 if url not in df_offres['url_restaurant'].values:
+#                     url_restaurant = clean_url(url)
+#                     nom_restaurant = recuperer_nom(url_restaurant, headers)
+#                     nouvelle_offre = recuperer_offre(url_restaurant, headers)
+#                     user_id = user
+#                     df_offres.loc[len(df_offres.index)] = [user_id, url_restaurant, nom_restaurant, np.nan, nouvelle_offre]
+#     file_name = 'df_offres.csv'
+#     df_offres.drop_duplicates(subset=['url_restaurant'], inplace=True)
+#     df_offres.to_csv(file_name, index=False)
+#     return df_offres
+    
+def save_and_update_offre(dict_url, df_offres):
+    '''Met à jour le DataFrame existant avec les nouvelles entrées de dict_url, ainsi que les offres actuelles'''
+    for user, url in dict_url.items():
+        url_restaurant = clean_url(url)
+        nom_restaurant = recuperer_nom(url_restaurant, headers)
+        nouvelle_offre = recuperer_offre(url_restaurant, headers)
+        user_id = user
+        if url_restaurant in df_offres['url_restaurant'].values:
+            index = df_offres[df_offres['url_restaurant'] == url_restaurant].index[0]
+            df_offres.at[index, 'offre_t-1'] = df_offres.at[index, 'offre_actuelle']
+            df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
+        else:
+            new_line = pd.DataFrame([[user_id, url_restaurant, nom_restaurant, np.nan, nouvelle_offre]],
+                                    columns=['user_id', 'url_restaurant', 'nom_restaurant', 'offre_t-1', 'offre_actuelle'])
+            df_offres = pd.concat([df_offres, new_line], ignore_index=True)
     df_offres.drop_duplicates(subset=['url_restaurant'], inplace=True)
+    file_name = 'df_offres.csv'
     df_offres.to_csv(file_name, index=False)
     return df_offres
             
