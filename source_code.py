@@ -111,53 +111,20 @@ def recuperer_offre(url, headers):
         print("La requête a échoué :", response.status_code)
         return None
     
-# def save_and_update_offre(dict_url, existing_df=None):
-#     '''Crée un nouveau DataFrame lors de la première entrée dans dict_url,
-#     et met à jour le DataFrame existant lorsqu'il y a de nouvelles entrées'''
-#     global df_offres
-#     if existing_df is None:
-#         data = []
-#         for user, url in dict_url.items():
-#             url_restaurant = clean_url(url)
-#             nom_restaurant = recuperer_nom(url_restaurant, headers)
-#             offre_actuelle = recuperer_offre(url_restaurant, headers)
-#             user_id = user
-#             data.append({'user_id': user_id, 'url_restaurant': url_restaurant, 'nom_restaurant': nom_restaurant, 'offre_actuelle': offre_actuelle})
-#         df_offres = pd.DataFrame(data)
-#     else:
-#         df_offres = existing_df.copy()
-#         if 'offre_t-1' in df_offres.columns:
-#             df_offres.drop(columns='offre_t-1', inplace=True)
-#         if 'offre_actuelle' in df_offres.columns:
-#             df_offres['offre_actuelle'] = df_offres['offre_actuelle'].astype(object)
-#             df_offres.rename(columns={'offre_actuelle': 'offre_t-1'}, inplace=True)
-#             for index, row in df_offres.iterrows():
-#                 nouvelle_offre = recuperer_offre(row['url_restaurant'], headers)
-#                 df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
-#             for user, url in dict_url.items():
-#                 if url not in df_offres['url_restaurant'].values:
-#                     url_restaurant = clean_url(url)
-#                     nom_restaurant = recuperer_nom(url_restaurant, headers)
-#                     nouvelle_offre = recuperer_offre(url_restaurant, headers)
-#                     user_id = user
-#                     df_offres.loc[len(df_offres.index)] = [user_id, url_restaurant, nom_restaurant, np.nan, nouvelle_offre]
-#     file_name = 'df_offres.csv'
-#     df_offres.drop_duplicates(subset=['url_restaurant'], inplace=True)
-#     df_offres.to_csv(file_name, index=False)
-#     return df_offres
-    
 def save_and_update_offre(dict_url, df_offres):
     '''Met à jour le DataFrame existant avec les nouvelles entrées de dict_url, ainsi que les offres actuelles'''
+    df_offres.drop(columns='offre_t-1', inplace=True)
+    df_offres['offre_actuelle'] = df_offres['offre_actuelle'].astype(object)
+    df_offres.rename(columns={'offre_actuelle': 'offre_t-1'}, inplace=True)
+    for index, row in df_offres.iterrows():
+                nouvelle_offre = recuperer_offre(row['url_restaurant'], headers)
+                df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
     for user, url in dict_url.items():
-        url_restaurant = clean_url(url)
-        nom_restaurant = recuperer_nom(url_restaurant, headers)
-        nouvelle_offre = recuperer_offre(url_restaurant, headers)
-        user_id = user
-        if url_restaurant in df_offres['url_restaurant'].values:
-            index = df_offres[df_offres['url_restaurant'] == url_restaurant].index[0]
-            df_offres.at[index, 'offre_t-1'] = df_offres.at[index, 'offre_actuelle']
-            df_offres.at[index, 'offre_actuelle'] = nouvelle_offre
-        else:
+        if url not in df_offres['url_restaurant'].values:
+            url_restaurant = clean_url(url)
+            nom_restaurant = recuperer_nom(url_restaurant, headers)
+            nouvelle_offre = recuperer_offre(url_restaurant, headers)
+            user_id = user
             new_line = pd.DataFrame([[user_id, url_restaurant, nom_restaurant, np.nan, nouvelle_offre]],
                                     columns=['user_id', 'url_restaurant', 'nom_restaurant', 'offre_t-1', 'offre_actuelle'])
             df_offres = pd.concat([df_offres, new_line], ignore_index=True)
@@ -189,27 +156,24 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-SET_ALERTS, CANCEL_ALERTS = range(2)
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text('Bienvenue! Envoyez-moi le lien de la page Deliveroo ou UberEats du restaurant qui vous intéresse.')
-    return SET_ALERTS
 
 user_links = {}
-df_offres = pd.read_csv('df_offres.csv')
+if os.path.exists('df_offres.csv'):
+    df_offres = pd.read_csv('df_offres.csv')
+else:
+    df_offres = pd.DataFrame(columns=['user_id', 'url_restaurant', 'nom_restaurant', 'offre_t-1', 'offre_actuelle'])
 
 async def save_user_link(update: Update, context: CallbackContext) -> None:
     if update.message.text.startswith("https://deliveroo.fr/") or update.message.text.startswith("https://www.ubereats.com/fr/"):
         user_id = update.message.from_user.id
         user_links[user_id] = update.message.text
-        buttons = [InlineKeyboardButton('Confirmer', callback_data='1'), InlineKeyboardButton('Annuler', callback_data='0')]
-        confirm = InlineKeyboardMarkup([buttons])
-        await update.message.reply_text('Lien enregistré avec succès! Vous recevrez une alerte dès que ce restaurant publie une offre.', 
-                                        reply_markup=confirm)
-        return
+        await update.message.reply_text(text='Alerte programmée... Pensez à activer les notifications Telegram!')
+        context.job_queue.run_repeating(new_offer_alert, 30)
     else:
         await update.message.reply_text('Veuillez envoyer un lien Deliveroo ou UberEats valide.')
-        return
 
 async def new_offer_alert(context: CallbackContext) -> None:
     global user_links, df_offres
@@ -223,17 +187,6 @@ async def new_offer_alert(context: CallbackContext) -> None:
             await context.bot.send_message(chat_id=user, text=alert)
     else:
         print('Pas de nouvelle offre')
-    
-async def user_alerts(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    await query.answer()
-    if query.data == '1':
-        await query.edit_message_text(text='Alerte programmée... Pensez à activer les notifications Telegram!')
-        context.job_queue.run_repeating(new_offer_alert, 30)
-        return CANCEL_ALERTS
-    elif query.data == '0':
-        await query.edit_message_text(text='C\'est noté... N\'hésitez pas à revenir!')
-        return
 
 async def stop_alerts(update: Update, context: CallbackContext) -> None:
     global user_links, df_offres
@@ -246,12 +199,9 @@ async def stop_alerts(update: Update, context: CallbackContext) -> None:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text('Sélectionnez les restaurants pour lesquels vous souhaitez arrêter les alertes:',
                                         reply_markup=reply_markup)
-        return
     else:
         await update.message.reply_text('Vous ne recevez actuellement aucune alerte. '
                                       'Si vous le souhaitez, envoyez un lien Deliveroo ou UberEats.')
-        return SET_ALERTS
-
 
 async def stop_alerts_callback(update: Update, context: CallbackContext) -> None:
     global user_links, df_offres, headers
@@ -263,30 +213,19 @@ async def stop_alerts_callback(update: Update, context: CallbackContext) -> None
         df_offres.drop(df_offres[df_offres.user_id == user_id].index, inplace=True)
         await query.edit_message_text('Vous ne recevrez plus d\'alertes. '
                                     'Si vous souhaitez reprendre, envoyez un lien Deliveroo ou UberEats.')
-        return SET_ALERTS
-    elif not query.data.isdigit():
+    else:
         restaurant_name = str(query.data)
         user_links = {key:val for key, val in user_links.items() if recuperer_nom(val, headers) != restaurant_name}
         df_offres.drop(df_offres[(df_offres.user_id == user_id) & (df_offres.nom_restaurant == restaurant_name)].index, inplace=True)
         await query.edit_message_text(f'Vous ne recevrez plus d\'alertes pour {restaurant_name}.')
-        return
 
-
+        
 if __name__ == '__main__':
     print('Starting bot...')
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    conv_handler = ConversationHandler(entry_points=[CommandHandler('start', start)], 
-                                   states={
-                                       SET_ALERTS: [
-                                           MessageHandler(filters.TEXT & ~filters.COMMAND, save_user_link),
-                                           CallbackQueryHandler(user_alerts),
-                                       ],
-                                       CANCEL_ALERTS: [
-                                           CommandHandler('stop', stop_alerts),
-                                           CallbackQueryHandler(stop_alerts_callback)
-                                       ]
-                                   },
-                                   fallbacks=[MessageHandler(filters.TEXT & ~filters.COMMAND, save_user_link)])
-    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_user_link))
+    app.add_handler(CommandHandler('stop', stop_alerts))
+    app.add_handler(CallbackQueryHandler(stop_alerts_callback))
     app.run_polling(poll_interval=3)
     print(user_links)
