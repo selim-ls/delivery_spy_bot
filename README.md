@@ -19,7 +19,7 @@ Créez un fichier `.env` contenant les informations sensibles telles que le toke
 BOT_TOKEN=your_bot_token_here
 ```
 
-Enfin, lancez le bot en exécutant le script principal `main.py`.
+Enfin, lancez le bot en exécutant le script principal `source_code.py`.
 
 ## Auteur
 
